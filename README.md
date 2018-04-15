@@ -72,5 +72,5 @@ The simulator returns the list of points from previously generated path that are
 
 ## Reflection
 
-The resulting path planner works well, but not perfectly. It has managed to accumulate incident-free runs. However, there is one performance issue. For example conside the case: if the vehicle is in the left lane and the next right lane is blocked, but right most lane is free. Then vehicle should immediately make change to right lane (by slowing down) so that in the next step it can transition to rightmost lane which is free. However, in the simulation it is not capable of such complex behavior and waits till it gets sufficient clearance to transition to right lane.
+The resulting path planner works well and has managed to accumulate incident-free runs. However, there is one performance issue. For example conside the case: if the vehicle is in the left lane and the next right lane is blocked, but right most lane is free. Then vehicle should immediately make change to right lane (by slowing down) so that in the next step it can transition to rightmost lane which is free. However, in the simulation it is not capable of such complex behavior and waits till it gets sufficient clearance to transition to right lane.
 
