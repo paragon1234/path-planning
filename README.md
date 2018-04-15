@@ -47,4 +47,30 @@ the path has processed since last time.
 3. Compile: `cmake .. && make`
 4. Run it: `./path_planning`.
 
-Here is the data provided from the Simulator to the C++ Program
+
+## Implementation
+The following steps are used:
+1. Construct interpolated waypoints for driving vehicle (using spline)
+2. From sensor fusion data determine whether the car can travel in the same lane
+3. From sensor fusion data, predict the future positions of the nearby vehicles.
+4. From step 2 and 3, determine whether the vehicle can travel in same lane or need to take left/right lane change
+5. Produce new path
+
+### 1. Construct Interpolated Waypoints of Nearby Area 
+
+The track waypoints given in the `highway_map.csv` file are spaced roughly 30 meters apart, so the first step in the process is to interpolate a set of nearby map waypoints and produce a set of much more tightly spaced (0.5 meters apart) waypoints. The path at current position and at a distance of 30m, 60m and 90m are used, to create smooth curve using spline. The curve between current position and 30m is interpolated at 0.5m. Each frame process a point in 0.02s, this result in velocity not exceeding the speed limit.
+
+
+### 2,3&4. Generate Predictions from Sensor Fusion Data
+
+The sensor fusion data received from the simulator in each iteration is used for each of the other cars on the road. It determines whether the vehicle is close to other vehicle in the same lane. If so, then it determines whether it can safely change lane to left/right lane. Otherwise, it reduces speed of the vehicle so that a safe distance can be maintained from the next vehicle in the lane.
+
+
+### 5. Produce New Path
+
+The simulator returns the list of points from previously generated path that are not traversed. This is used to project the car's state into the future. This helps to generate smoother transitions. From there a spline is generated beginning with the last two points of the previous path that have been kept (or the current position, heading, and velocity if no current path exists), and ending with three points 30, 60 and 90 meters ahead and in the target lane. This produces a smooth x and y trajectory. To prevent excessive acceleration and jerk, the velocity is only allowed increment or decrement by a small amount.
+
+## Conclusion
+
+The resulting path planner works well, but not perfectly. It has managed to accumulate incident-free runs. However, there are a few performance issues. For example conside the case: if the vehicle is in the left lane and the next right lane is blocked, but right most lane is free. Then vehicle should immediately make change to right lane (by slowing down) so that in the next step it can transition to rightmost lane which is free. However, in the simulation it is not capable of such complex behavior and waits till it gets sufficient clearance to transition to right lane.
+
