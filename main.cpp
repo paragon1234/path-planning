@@ -15,6 +15,8 @@ using namespace std;
 // for convenience
 using json = nlohmann::json;
 
+//enum state { KL, CLL, CLR };
+
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
@@ -164,6 +166,33 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 }
 
+
+bool clear_lane(int lane, double car_s, double fut_s, int path_size, 
+	            double ref_vel, vector<vector<double>> sensor_fusion)
+{
+	bool ret = true;
+	for (int i = 0; i < sensor_fusion.size(); ++i)
+	{
+		int d = sensor_fusion[i][6];
+		if (d > 2 + 4 * lane - 2 && d < 2 + 4 * lane + 2)
+		{
+			double vx = sensor_fusion[i][3];
+			double vy = sensor_fusion[i][4];
+			double v = sqrt(vx*vx + vy*vy);
+			double s = sensor_fusion[i][5];
+
+			double s_future = s + path_size*0.02*v;
+			if (s > car_s && s < car_s + 20) //Current position of car is collision free
+				return false;
+			if (s > car_s - 10 && s < car_s-5 && (v - ref_vel) > 0) //No vehicle is overtaking from behind
+				return false;
+			if (s_future > fut_s - 10 && s_future < fut_s+5) //Future position of car is collision free
+				return false;
+		}
+	}
+	return ret;
+}
+
 int main() {
   uWS::Hub h;
 
@@ -201,7 +230,10 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  int lane = 1;
+  double ref_vel = 0.0;
+
+  h.onMessage([&ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -302,20 +334,57 @@ int main() {
 	        */
 
 
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-                int lane = 1;
-                double ref_vel = 49;
+          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 
                 int path_size = previous_path_x.size();
                 double ref_x = car_x;
                 double ref_y = car_y;
                 double yaw = deg2rad(car_yaw);
+				bool too_close = false;
+
+				//From sensor fusion, check whether a car is too close
+				if (path_size > 2)
+					car_s = end_path_s;
+				for (int i = 0; i < sensor_fusion.size(); ++i)
+				{
+					int d = sensor_fusion[i][6];
+					if (d > 2 + 4 * lane - 2 && d < 2 + 4 * lane + 2)
+					{
+						double vx = sensor_fusion[i][3];
+						double vy = sensor_fusion[i][4];
+						double v = sqrt(vx*vx + vy*vy);
+						double s = sensor_fusion[i][5];
+
+						s += path_size*0.02*v;
+						if (s > car_s && s - car_s < 30)
+							too_close = true;
+					}
+				}
+				
+				//If too close, then check whether left lane change or right lane change is feasible
+				//Else reduce the speed
+				if (too_close)
+				{
+					if (lane != 0 && clear_lane(lane - 1, j[1]["s"], car_s, path_size, ref_vel, sensor_fusion))
+						lane -= 1;
+					else
+						if (lane != 2 && clear_lane(lane + 1, j[1]["s"], car_s, path_size, ref_vel, sensor_fusion))
+							lane += 1;
+						else
+							ref_vel -= 0.224;
+				}
+				else
+					if (ref_vel < 49.5)
+						ref_vel += 0.224;
+				
+
+
           	vector<double> ptsx;
           	vector<double> ptsy;
-                cout << "prev size=" << path_size << endl;
-				std::cout << "prev_vals =";
-				for (int i = 0; i< path_size; ++i)
-					std::cout << previous_path_x[i] << "|" << previous_path_y[i] << " ";
-				std::cout << std::endl;
+                //cout << "car_x = " << car_x << " car_y = " << car_y << " prev size=" << path_size << endl;
+				//std::cout << "prev_vals =";
+				//for (int i = 0; i< path_size; ++i)
+				//	std::cout << previous_path_x[i] << "|" << previous_path_y[i] << " ";
+				//std::cout << std::endl;
 
                 //If its the start od simulation, then get the initial points from car and another point from a tangent drawn backward in the direction of car
                 //Else get the points from previous trajectory.
@@ -362,9 +431,9 @@ int main() {
                 //Make initial car position as origin and its orientaion as zero degree.
                 for(int i=0; i<ptsx.size(); ++i)
                 {
-                    double x = -ref_x + ptsx[i];
-                    double y = -ref_y + ptsy[i];
- 
+                    double x =  ptsx[i] - ref_x;
+                    double y =  ptsy[i] - ref_y;
+
                     ptsx[i] =  x*cos(yaw) + y*sin(yaw);
                     ptsy[i] = -x*sin(yaw) + y*cos(yaw);
                 }
@@ -380,7 +449,7 @@ int main() {
                 }
 
                 //Interpolate spline points so that we travel at a specified speed
-                double x = 30;
+                double x = 30.0;
                 double y = s(x);
                 double dist = sqrt(x*x + y*y);
 
@@ -393,19 +462,20 @@ int main() {
                     x_addon = x_point;
        
                     //Transform from car coordinate system to map coordinate system
-                    double ref_x = x_point;
-                    double ref_y = y_point;
+                    double x = x_point;
+                    double y = y_point;
 
-                    x_point = x_point*cos(yaw) - y_point*sin(yaw);
-                    y_point = x_point*sin(yaw) + y_point*cos(yaw);
+                    x_point = x*cos(yaw) - y*sin(yaw);
+                    y_point = x*sin(yaw) + y*cos(yaw);
 
-                    next_x_vals.push_back(x_point+ref_x);
-                    next_y_vals.push_back(y_point+ref_y);
+                    next_x_vals.push_back(x_point+ ref_x);
+                    next_y_vals.push_back(y_point+ ref_y);
                 }
-                std::cout << "next_vals =";
-                for(int i=0; i< next_x_vals.size(); ++i)
-                    std::cout << next_x_vals[i] << "|" << next_y_vals[i] << " ";
-                std::cout << std::endl << std::endl;
+
+                //std::cout << "next_vals =";
+                //for(int i=0; i< next_x_vals.size(); ++i)
+                //    std::cout << next_x_vals[i] << "|" << next_y_vals[i] << " ";
+                //std::cout << std::endl << std::endl;
 
           	msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
